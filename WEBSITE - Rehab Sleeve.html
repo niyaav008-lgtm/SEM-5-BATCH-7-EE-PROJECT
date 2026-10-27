@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sleeve Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: phone-first app, top bar with link status, content, bottom tab bar. Clinical teal on cool paper. */
+:root{
+  --bg:#F2F6F7; --surface:#FFFFFF; --ink:#12292E; --muted:#5B7479; --line:#D9E3E5;
+  --accent:#0E7C86; --accent-ink:#FFFFFF;
+  --c-mot:#0E7C86; --c-flex:#D98A1F; --c-fsr:#6B5BD2;
+  --ok:#2E8B57; --warn:#C47A0A; --crit:#C23B3B;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;color:var(--muted);font-weight:500}
+td:not(:first-child){font-family:var(--mono);font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border:0}
+td .sw{display:inline-block;width:10px;height:3px;margin-right:8px;vertical-align:middle;border-radius:2px}
+input[type=range]{padding:0;border:0;background:none;accent-color:var(--accent)}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0C1A1D; --surface:#14272B; --ink:#E6F1F2; --muted:#8CA6AB; --line:#25403F;
+  --accent:#3FB6C0; --accent-ink:#06191C;
+  --c-mot:#3FB6C0; --c-flex:#F0B04A; --c-fsr:#A294F5;
+  --ok:#5CC48A; --warn:#F0B04A; --crit:#F27B7B; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:720px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0 8px}
+header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:-.01em}
+header small{display:block;color:var(--muted);font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:99px;border:1px solid var(--line);background:var(--surface);font-size:12px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chip.on .dot{background:var(--ok)}.chip.demo .dot{background:var(--warn)}
+section{display:none;padding-top:8px}section.active{display:block}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:20px 0 8px;font-weight:600}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.metric{padding:12px}
+.metric .lbl{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.metric .sw{width:10px;height:3px;border-radius:2px}
+.metric .val{font:500 28px/1.1 var(--mono);margin-top:6px;font-variant-numeric:tabular-nums}
+.metric .val i{font:400 12px var(--font);color:var(--muted);font-style:normal;margin-left:2px}
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
+.bar b{display:block;height:100%;width:0;border-radius:3px;transition:width .15s}
+.status{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);margin-top:10px}
+.status .pill{white-space:nowrap;font-size:12px;font-weight:600;padding:3px 9px;border-radius:99px;color:#fff;background:var(--muted)}
+.status.ok .pill{background:var(--ok)}.status.warn .pill{background:var(--warn)}.status.crit .pill{background:var(--crit)}
+canvas{width:100%;display:block}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px;flex-wrap:wrap}
+.legend span::before{content:"";display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle;background:var(--c)}
+button,select,input,textarea{font:inherit;color:inherit}
+.btn{border:1px solid var(--line);background:var(--surface);padding:10px 14px;border-radius:8px;cursor:pointer;min-height:44px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.stop{background:var(--crit);border-color:var(--crit);color:#fff;font-weight:600}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row>*{min-width:0}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:44px}
+.field{margin-bottom:12px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:420px){.two{grid-template-columns:1fr}.metric .val{font-size:22px}}
+.timer{font:500 22px var(--mono);font-variant-numeric:tabular-nums}
+.sess{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sess:last-child{border:0}
+.sess .t{font-weight:600}.sess .m{color:var(--muted);font-size:12px;font-family:var(--mono)}
+.score{font:600 22px var(--mono);text-align:right;grid-row:span 2;align-self:center}
+.empty{color:var(--muted);text-align:center;padding:24px 12px}
+.note{font-size:12px;color:var(--muted)}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);display:flex;justify-content:center;
+  padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));z-index:5}
+nav div{display:flex;width:100%;max-width:720px}
+nav button{flex:1;background:none;border:0;padding:10px 4px;color:var(--muted);cursor:pointer;font-size:13px;border-radius:8px;min-height:48px}
+nav button.active{color:var(--accent);font-weight:600}
+pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.5 var(--mono);margin:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-family:var(--mono)}
+details summary{cursor:pointer;color:var(--accent);font-weight:500;padding:6px 0}
+code{font-family:var(--mono);font-size:12.5px;background:var(--bg);padding:1px 5px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div><h1>Sleeve Monitor</h1><small>FSR · Flex · Accelerometer</small></div>
+  <span class="chip" id="linkChip"><span class="dot"></span><span id="linkText">Not connected</span></span>
+</header>
+
+<!-- LIVE -->
+<section id="live" class="active">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><div class="note">Session</div><div class="timer" id="timer">00:00</div></div>
+      <button class="btn primary" id="sessBtn">Start session</button>
+    </div>
+  </div>
+
+  <h2>Live sensors</h2>
+  <div class="grid3">
+    <div class="card metric"><div class="lbl"><span class="sw" style="background:var(--c-mot)"></span>Motion</div><div class="val"><span id="vMot">--</span><i>%</i></div><div class="bar"><b id="bMot" style="background:var(--c-mot)"></b></div></div>
+    <div class="card metric"><div class="lbl"><span class="sw" style="background:var(--c-flex)"></span>Hand bend</div><div class="val"><span id="vFlex">--</span><i>%</i></div><div class="bar"><b id="bFlex" style="background:var(--c-flex)"></b></div></div>
+    <div class="card metric"><div class="lbl"><span class="sw" style="background:var(--c-fsr)"></span>Grip force</div><div class="val"><span id="vFsr">--</span><i>%</i></div><div class="bar"><b id="bFsr" style="background:var(--c-fsr)"></b></div></div>
+  </div>
+
+  <div class="card" style="margin-top:10px">
+    <div class="note">Accelerometer (g)</div>
+    <div class="grid3" style="margin-top:6px">
+      <div><div class="note">X</div><div class="timer" id="vAx">--</div></div>
+      <div><div class="note">Y</div><div class="timer" id="vAy">--</div></div>
+      <div><div class="note">Z</div><div class="timer" id="vAz">--</div></div>
+    </div>
+  </div>
+
+  <div class="status" id="status"><span class="pill" id="pill">Waiting</span><span id="statusText">Connect the sleeve or start demo mode.</span></div>
+
+  <div class="card" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between"><div class="note">Servo assistance</div><div class="timer" style="font-size:18px"><span id="vAssist">--</span>%</div></div>
+    <div class="bar" style="height:10px"><b id="bAssist" style="background:var(--accent)"></b></div>
+  </div>
+
+  <h2>Servo motor</h2>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <div class="note">Press Start to run the servo that assists the hand.</div>
+      <span class="chip" id="motorChip"><span class="dot"></span><span id="motorText">Motor stopped</span></span>
+    </div>
+    <div class="row" style="margin-bottom:14px"><button class="btn primary" id="startMotorBtn" style="flex:1">Start motor</button><button class="btn stop" id="stopMotorBtn" style="flex:1">Stop motor</button></div>
+    <div class="field"><label for="ctlLevel">Assistance level: <b id="ctlLevelV">50</b>%</label><input type="range" id="ctlLevel" min="0" max="100" value="50"></div>
+    <div class="field"><label for="ctlSpeed">Motor speed: <b id="ctlSpeedV">50</b>% (slow to fast)</label><input type="range" id="ctlSpeed" min="0" max="100" value="50"></div>
+    <p class="note" id="ctlNote" style="margin:0">Connect first. Level and speed apply while the motor is running too.</p>
+    <details><summary>Commands sent to the ESP32 (for your hardware teammate)</summary>
+      <div class="field"><label for="cmdStart">Start command (Bluetooth)</label><input id="cmdStart" autocapitalize="off" autocomplete="off" value="START,{level},{speed}\n"></div>
+      <div class="field"><label for="cmdStop">Stop command (Bluetooth)</label><input id="cmdStop" autocapitalize="off" autocomplete="off" value="STOP\n"></div>
+      <p class="note"><code>{level}</code> and <code>{speed}</code> become the slider values, 0 to 100. <code>\n</code> is a new line. Change these if the ESP32 code expects different text.</p>
+    </details>
+  </div>
+
+  <h2>Normal and highest values</h2>
+  <div class="card" style="padding:0;overflow-x:auto"><table><thead><tr><th>Sensor</th><th>Now</th><th>Normal</th><th>Highest</th></tr></thead><tbody>
+    <tr><td><span class="sw" style="background:var(--c-mot)"></span>Motion %</td><td id="sMotN">--</td><td id="sMotA">--</td><td id="sMotP">--</td></tr>
+    <tr><td><span class="sw" style="background:var(--c-flex)"></span>Hand bend %</td><td id="sFlexN">--</td><td id="sFlexA">--</td><td id="sFlexP">--</td></tr>
+    <tr><td><span class="sw" style="background:var(--c-fsr)"></span>Grip force %</td><td id="sFsrN">--</td><td id="sFsrA">--</td><td id="sFsrP">--</td></tr>
+    <tr><td><span class="sw" style="background:var(--accent)"></span>Servo assist %</td><td id="sAssistN">--</td><td id="sAssistA">--</td><td id="sAssistP">--</td></tr>
+  </tbody></table></div>
+  <div class="row" style="justify-content:space-between;margin-top:8px"><span class="note">Normal is the average since you connected.</span><button class="btn" id="resetStatsBtn">Reset</button></div>
+
+  <div class="row" style="justify-content:space-between;margin-top:20px"><h2 style="margin:0">Last 30 seconds</h2><button class="btn" id="pauseBtn">Pause graph</button></div>
+  <div class="card" style="margin-top:8px"><canvas id="chart" height="190"></canvas>
+    <div class="legend"><span style="--c:var(--c-mot)">Motion</span><span style="--c:var(--c-flex)">Hand bend</span><span style="--c:var(--c-fsr)">Grip force</span></div>
+  </div>
+
+  <h2>Connection</h2>
+  <div class="card">
+    <div class="field"><label for="mode">Data source</label>
+      <select id="mode">
+        <option value="ble">Bluetooth (BLE)</option>
+        <option value="demo">Demo (simulated data)</option>
+        <option value="wifi">Wi-Fi (ESP32 address)</option>
+      </select></div>
+    <div class="field" id="urlField" hidden><label for="url">ESP32 address</label>
+      <input id="url" inputmode="url" autocapitalize="off" autocomplete="off" placeholder="http://192.168.4.1/data  or  ws://192.168.4.1:81"></div>
+    <div class="row"><button class="btn primary" id="connBtn">Connect</button><button class="btn" id="discBtn" hidden>Disconnect</button></div>
+    <p class="note" id="connNote" style="margin:10px 0 0"></p>
+    <details><summary>What data does the app expect from the ESP32?</summary>
+      <p class="note">Bluetooth (Nordic UART service). One reading per line, up to 10 times a second, in this order:</p>
+      <pre>fsr,flex,ax,ay,az,servo
+2048,1900,0.02,-0.01,1.00,45</pre>
+      <p class="note"><code>fsr</code> and <code>flex</code>: 0 to 100, or raw 0 to 4095. <code>ax, ay, az</code>: acceleration in g (m/s&sup2; also works). <code>servo</code>: servo position or assistance, 0 to 100 %. JSON also works: <code>{"fsr":..,"flex":..,"ax":..,"ay":..,"az":..,"servo":..}</code></p>
+    </details>
+  </div>
+</section>
+
+<!-- HISTORY -->
+<section id="history">
+  <h2>Recovery score per session</h2>
+  <div class="card"><canvas id="trend" height="170"></canvas><div class="note" id="trendNote"></div></div>
+  <h2>Sessions</h2>
+  <div class="card" style="padding:0" id="sessList"></div>
+  <div class="row" style="margin-top:12px"><button class="btn" id="sampleBtn">Load sample sessions</button><button class="btn" id="clearBtn">Clear history</button></div>
+  <p class="note" id="clearNote"></p>
+</section>
+
+<!-- PROFILE -->
+<section id="profile">
+  <h2>Patient profile</h2>
+  <div class="card">
+    <div class="two">
+      <div class="field"><label for="pName">Patient name</label><input id="pName" autocomplete="off"></div>
+      <div class="field"><label for="pAge">Age</label><input id="pAge" inputmode="numeric"></div>
+    </div>
+    <div class="two">
+      <div class="field"><label for="pSide">Affected hand</label><select id="pSide"><option>Right</option><option>Left</option></select></div>
+      <div class="field"><label for="pCond">Condition</label><input id="pCond" placeholder="e.g. Post-surgery weakness" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="pNotes">Therapist notes</label><textarea id="pNotes" rows="3"></textarea></div>
+    <div class="note" id="saveNote">Saved automatically on this device.</div>
+  </div>
+</section>
+
+<!-- REPORT -->
+<section id="report">
+  <h2>Progress report</h2>
+  <div class="card"><pre id="reportText"></pre></div>
+  <div class="row" style="margin-top:12px"><button class="btn primary" id="csvBtn">Download CSV</button><button class="btn" id="copyBtn">Copy report</button></div>
+  <p class="note" id="reportNote"></p>
+</section>
+</div>
+
+<nav><div id="tabs">
+  <button data-tab="live" class="active">Live</button>
+  <button data-tab="history">History</button>
+  <button data-tab="profile">Profile</button>
+  <button data-tab="report">Report</button>
+</div></nav>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id)};
+var NUS="6e400001-b5a5-f393-a8be-ec5ed3b8a3c0", NUS_TX="6e400003-b5a5-f393-a8be-ec5ed3b8a3c0", NUS_RX="6e400002-b5a5-f393-a8be-ec5ed3b8a3c0";
+
+/* ---------- storage (safe) ---------- */
+function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
+var profile=Object.assign({name:"",age:"",side:"Right",cond:"",notes:""},load("sm_profile",{}));
+var sessions=load("sm_sessions2",[]);
+
+/* ---------- state ---------- */
+var link={mode:"demo",on:false,stop:null};
+var last={mot:0,flex:0,fsr:0,assist:0,ax:0,ay:0,az:0,t:0};
+var buf=[];            // {t,mmg,flex,fsr}
+var WINDOW=30000;
+var sess=null;         // active session
+var paused=false,pausedAt=0;
+var demoCtl=null, motorOn=false;
+function newStats(){return{mot:{n:0,sum:0,max:0},flex:{n:0,sum:0,max:0},fsr:{n:0,sum:0,max:0},assist:{n:0,sum:0,max:0}}}
+var stats=newStats();
+
+var clamp=function(x,a,b){return Math.max(a,Math.min(b,x))};
+function norm(v){v=Number(v);if(!isFinite(v))return 0;if(v>100)v=v/4095*100;return clamp(v,0,100)}
+
+/* ---------- incoming data ---------- */
+function accelG(v){v=Number(v);return isFinite(v)?v:0}
+function ingest(raw){
+  var o=null,f,r,ax,ay,az,a=null;
+  if(raw&&typeof raw==="object")o=raw;
+  else{
+    var line=String(raw).trim(); if(!line)return;
+    if(line[0]==="{"){try{o=JSON.parse(line)}catch(e){return}}
+    else{var p=line.split(/[,;\s]+/);if(p.length<5)return;o={fsr:p[0],flex:p[1],ax:p[2],ay:p[3],az:p[4],servo:p.length>5?p[5]:null}}
+  }
+  if(o.fsr==null||o.flex==null||o.ax==null||o.ay==null||o.az==null)return;
+  ax=accelG(o.ax);ay=accelG(o.ay);az=accelG(o.az);
+  var mag=Math.sqrt(ax*ax+ay*ay+az*az);
+  if(mag>4){ax/=9.81;ay/=9.81;az/=9.81;mag/=9.81}            // m/s2 -> g
+  a=o.servo!=null?o.servo:o.assist;
+  var d={fsr:norm(o.fsr),flex:norm(o.flex),ax:ax,ay:ay,az:az,mag:mag,
+    mot:clamp(Math.abs(mag-1)/0.5*100,0,100),assist:(a!=null&&a!=="")?norm(a):0,t:Date.now()};
+  last=d; buf.push(d);
+  ["mot","flex","fsr","assist"].forEach(function(k){var t=stats[k];t.n++;t.sum+=d[k];if(d[k]>t.max)t.max=d[k]});
+  var cut=d.t-WINDOW-1000; while(buf.length&&buf[0].t<cut)buf.shift();
+  if(sess)record(d);
+  render();
+}
+function lines(chunkState,text){
+  chunkState.s+=text; var parts=chunkState.s.split(/\r?\n/); chunkState.s=parts.pop();
+  parts.forEach(ingest);
+}
+
+/* ---------- connections ---------- */
+function setLink(on,label,cls){
+  link.on=on; var c=$("linkChip"); c.className="chip"+(cls?" "+cls:""); $("linkText").textContent=label;
+  $("connBtn").hidden=on; $("discBtn").hidden=!on; $("mode").disabled=on; $("url").disabled=on;
+}
+function stopLink(){ if(link.stop){try{link.stop()}catch(e){}} link.stop=null; link.ws=null; link.rx=null; demoCtl=null; motorOn=false; setLink(false,"Not connected"); render() }
+
+function startDemo(){
+  var t0=performance.now(), seed=Math.random()*10, da=0, phase=0, prev=0, lastT=t0;
+  var id=setInterval(function(){
+    var now=performance.now(), t=(now-t0)/1000, dt=(now-lastT)/1000; lastT=now;
+    var run=demoCtl&&demoCtl.on, lvl=demoCtl?demoCtl.level:0, spd=demoCtl?demoCtl.speed:50;
+    if(run)phase+=dt*(0.4+spd/100*3.2);
+    var target=run?lvl*(0.5-0.5*Math.cos(phase)):0;
+    da+=(target-da)*0.35; var vel=(da-prev)/Math.max(dt,0.01); prev=da;
+    var flex=clamp(8+da*0.75+Math.sin(t*5)*1.2,0,100);
+    var fsr=clamp(6+da*0.45+Math.sin(t*11+seed)*2,0,100);
+    var ax=0.03*Math.sin(t*7+seed)+vel*0.004, ay=0.03*Math.cos(t*5)+vel*0.003, az=0.99+vel*0.006+0.01*Math.sin(t*9);
+    ingest({fsr:fsr,flex:flex,ax:ax,ay:ay,az:az,servo:da});
+  },100);
+  link.stop=function(){clearInterval(id)};
+  setLink(true,"Demo mode","demo"); $("connNote").textContent="Simulated data. Nothing is coming from the sleeve.";
+}
+
+function startWifi(url){
+  link.url=url; link.ws=null;
+  if(/^wss?:/i.test(url)){
+    var ws=new WebSocket(url), cs={s:""}; link.ws=ws;
+    ws.onopen=function(){setLink(true,"Wi-Fi connected","on")};
+    ws.onmessage=function(e){lines(cs,String(e.data)+"\n")};
+    ws.onerror=function(){$("connNote").textContent="Could not reach the ESP32. Check that the phone is on the ESP32's Wi-Fi."};
+    ws.onclose=function(){if(link.on)stopLink()};
+    link.stop=function(){ws.onclose=null;ws.close()};
+    setLink(true,"Connecting…",""); return;
+  }
+  var alive=true, fails=0; setLink(true,"Connecting…","");
+  (function poll(){
+    if(!alive)return;
+    var ctl=new AbortController(), to=setTimeout(function(){ctl.abort()},1500);
+    fetch(url,{signal:ctl.signal,cache:"no-store"}).then(function(r){return r.text()}).then(function(txt){
+      clearTimeout(to); fails=0; if(!link.on||!alive)return;
+      if(link.label!=="ok"){link.label="ok";setLink(true,"Wi-Fi connected","on")}
+      txt.trim().split(/\r?\n/).slice(-1).forEach(ingest);
+      setTimeout(poll,200);
+    }).catch(function(){
+      clearTimeout(to); fails++; if(!alive)return;
+      if(fails>=5){$("connNote").textContent="No reply from the ESP32. Check the address, that the phone is on the same Wi-Fi, and that the ESP32 allows cross-origin requests (see the ESP32 sketch).";stopLink();return}
+      setTimeout(poll,500);
+    });
+  })();
+  link.label="";
+  link.stop=function(){alive=false};
+}
+
+function startBle(){
+  if(!navigator.bluetooth||window.isSecureContext===false){$("connNote").textContent="Bluetooth is blocked here. Use Chrome on Android and open this file by typing file:///storage/emulated/0/Download/index.html in the address bar (or use Chrome on a laptop).";return}
+  navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[NUS]}).then(function(dev){
+    setLink(true,"Connecting…","");
+    dev.addEventListener("gattserverdisconnected",function(){if(link.on)stopLink()});
+    return dev.gatt.connect().then(function(srv){return srv.getPrimaryService(NUS)})
+      .then(function(svc){return svc.getCharacteristic(NUS_TX).then(function(tx){
+        return svc.getCharacteristic(NUS_RX).then(function(rx){link.rx=rx;return tx},function(){return tx})})})
+      .then(function(ch){
+        var cs={s:""}, dec=new TextDecoder();
+        ch.addEventListener("characteristicvaluechanged",function(e){lines(cs,dec.decode(e.target.value))});
+        return ch.startNotifications().then(function(){
+          link.stop=function(){try{dev.gatt.disconnect()}catch(e){}};
+          setLink(true,(dev.name||"Sleeve")+" connected","on"); $("connNote").textContent="";
+        });
+      });
+  }).catch(function(e){
+    setLink(false,"Not connected");
+    $("connNote").textContent=(e&&e.name==="NotFoundError"&&/cancel/i.test(e.message))?"No device selected.":"Bluetooth failed: "+(e&&e.message||e)+". The ESP32 must send data on the Nordic UART service (see the ESP32 sketch).";
+  });
+}
+
+/* ---------- sessions ---------- */
+function startSession(){
+  sess={start:Date.now(),n:0,sum:{mot:0,flex:0,fsr:0,assist:0},peak:{mot:0,flex:0,fsr:0,assist:0},series:[],lastSec:-1};
+  $("sessBtn").textContent="End session"; $("sessBtn").className="btn stop"; render();
+}
+function record(d){
+  sess.n++; ["mot","flex","fsr","assist"].forEach(function(k){sess.sum[k]+=d[k]});
+  ["mot","flex","fsr","assist"].forEach(function(k){sess.peak[k]=Math.max(sess.peak[k],d[k])});
+  var sec=Math.floor((d.t-sess.start)/1000);
+  if(sec!==sess.lastSec&&sess.series.length<900){sess.lastSec=sec;sess.series.push(Math.round(d.assist))}
+}
+function scoreOf(a){
+  var raw=clamp(a.peakFlex/100,0,1)*45+clamp(a.peakFsr/100,0,1)*35+clamp(a.avgMot/30,0,1)*20;
+  return Math.round(clamp(raw*(1-a.avgAssist/200),0,100));
+}
+function endSession(){
+  var s=sess; sess=null;
+  $("sessBtn").textContent="Start session"; $("sessBtn").className="btn primary";
+  if(s.n<5){$("statusText").textContent="Session too short to save. Keep it running for at least a few seconds.";render();return}
+  var r={id:s.start,date:s.start,dur:Math.round((Date.now()-s.start)/1000),samples:s.n,
+    avgMot:s.sum.mot/s.n,peakMot:s.peak.mot,avgFlex:s.sum.flex/s.n,peakFlex:s.peak.flex,
+    avgFsr:s.sum.fsr/s.n,peakFsr:s.peak.fsr,avgAssist:s.sum.assist/s.n,peakAssist:s.peak.assist,
+    source:link.mode,series:s.series};
+  r.score=scoreOf(r); sessions.unshift(r); if(sessions.length>200)sessions.pop();
+  save("sm_sessions2",sessions); render(); renderHistory(); renderReport();
+}
+
+/* ---------- formatting ---------- */
+var pad=function(n){return(n<10?"0":"")+n};
+function dur(s){return pad(Math.floor(s/60))+":"+pad(s%60)}
+function dstr(t){var d=new Date(t);return d.toLocaleDateString(undefined,{day:"numeric",month:"short"})+", "+d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})}
+
+/* ---------- live view ---------- */
+function setVal(v,b,x){$(v).textContent=link.on||buf.length?Math.round(x):"--";$(b).style.width=(link.on||buf.length?x:0)+"%"}
+function renderStats(){
+  var has=link.on||buf.length;
+  [["Mot","mot"],["Flex","flex"],["Fsr","fsr"],["Assist","assist"]].forEach(function(p){
+    var t=stats[p[1]];
+    $("s"+p[0]+"N").textContent=has?Math.round(last[p[1]]):"--";
+    $("s"+p[0]+"A").textContent=t.n?Math.round(t.sum/t.n):"--";
+    $("s"+p[0]+"P").textContent=t.n?Math.round(t.max):"--";
+  });
+}
+function render(){
+  $("timer").textContent=sess?dur(Math.floor((Date.now()-sess.start)/1000)):"00:00";
+  if(paused)return;
+  renderStats();
+  setVal("vMot","bMot",last.mot);setVal("vFlex","bFlex",last.flex);setVal("vFsr","bFsr",last.fsr);setVal("vAssist","bAssist",last.assist);
+  $("timer").textContent=sess?dur(Math.floor((Date.now()-sess.start)/1000)):"00:00";
+  var has=link.on&&buf.length;
+  ["ax","ay","az"].forEach(function(k){$("v"+k.toUpperCase().replace("A","A").slice(0,1)+k.slice(1).toLowerCase()).textContent=has?last[k].toFixed(2):"--"});
+  $("motorChip").className="chip"+(motorOn?" on":""); $("motorText").textContent=motorOn?"Motor running":"Motor stopped";
+  var st=$("status"),pill=$("pill"),txt=$("statusText");
+  if(!buf.length||!link.on){st.className="status";pill.textContent="Waiting";if(!sess&&txt.textContent.indexOf("too short")<0)txt.textContent="Connect the sleeve or start demo mode.";}
+  else{
+    if(motorOn){st.className="status ok";pill.textContent="Assisting";txt.textContent="Servo is running at "+Math.round(last.assist)+"% of its range.";}
+    else{st.className="status";pill.textContent="Motor off";txt.textContent="Sensors are live. Press Start motor to begin assistance.";}
+  }
+  drawChart();
+}
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function setup(c){var r=c.getBoundingClientRect(),dpr=window.devicePixelRatio||1,h=Number(c.getAttribute("height"));
+  c.width=Math.round(r.width*dpr);c.height=Math.round(h*dpr);var x=c.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);return{x:x,w:r.width,h:h}}
+function grid(x,w,h,L,T,R,B,maxLabel){
+  x.strokeStyle=css("--line");x.fillStyle=css("--muted");x.lineWidth=1;x.font="11px "+css("--mono");x.textAlign="right";x.textBaseline="middle";
+  [0,25,50,75,100].forEach(function(v){var y=T+(h-T-B)*(1-v/100);x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();x.fillText(v,L-6,y)});
+}
+function drawChart(){
+  var c=$("chart");if(!c.offsetParent)return;var o=setup(c),x=o.x,w=o.w,h=o.h,L=30,T=8,R=8,B=18;
+  grid(x,w,h,L,T,R,B);
+  x.fillStyle=css("--muted");x.textAlign="center";x.textBaseline="top";
+  [-30,-20,-10,0].forEach(function(s){x.fillText(s===0?"now":s+"s",L+(w-L-R)*(1+s/30),h-B+4)});
+  var now=paused?pausedAt:Date.now();
+  [["mot","--c-mot"],["flex","--c-flex"],["fsr","--c-fsr"]].forEach(function(p){
+    x.strokeStyle=css(p[1]);x.lineWidth=2;x.lineJoin="round";x.beginPath();var started=false;
+    buf.forEach(function(d){var px=L+(w-L-R)*(1-(now-d.t)/WINDOW);if(px<L)return;var py=T+(h-T-B)*(1-d[p[0]]/100);if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
+    x.stroke();
+  });
+}
+
+/* ---------- history ---------- */
+function renderHistory(){
+  var list=$("sessList");
+  if(!sessions.length){list.innerHTML='<div class="empty">No sessions yet. Start a session on the Live tab, or load sample sessions to preview this screen.</div>'}
+  else{list.innerHTML="";sessions.forEach(function(s){
+    var d=document.createElement("div");d.className="sess";
+    var t=document.createElement("div");t.className="t";t.textContent=dstr(s.date);
+    var sc=document.createElement("div");sc.className="score";sc.textContent=s.score;sc.style.color=s.score>=60?css("--ok"):s.score>=35?css("--warn"):css("--crit");
+    var m=document.createElement("div");m.className="m";
+    m.textContent=dur(s.dur)+" · motion "+Math.round(s.avgMot)+"% · bend "+Math.round(s.peakFlex)+"% · force "+Math.round(s.avgFsr)+"% · assist "+Math.round(s.avgAssist)+"% (max "+Math.round(s.peakAssist||s.avgAssist)+"%)"+(s.sample?" · sample":"");
+    d.appendChild(t);d.appendChild(sc);d.appendChild(m);list.appendChild(d)})}
+  drawTrend();
+}
+function drawTrend(){
+  var c=$("trend");if(!c.offsetParent)return;var o=setup(c),x=o.x,w=o.w,h=o.h,L=30,T=8,R=8,B=18;
+  grid(x,w,h,L,T,R,B);
+  var data=sessions.slice(0,14).reverse();
+  $("trendNote").textContent=data.length?"Last "+data.length+" session"+(data.length>1?"s":"")+", oldest to newest. Higher is better.":"Scores appear here after your first session.";
+  if(!data.length)return;
+  var n=data.length,gw=(w-L-R)/n,bw=Math.min(28,gw*0.6);
+  data.forEach(function(s,i){
+    var cx=L+gw*(i+.5),bh=(h-T-B)*s.score/100;
+    x.fillStyle=css("--accent");x.globalAlpha=.85;x.fillRect(cx-bw/2,h-B-bh,bw,bh);x.globalAlpha=1;
+    x.fillStyle=css("--muted");x.textAlign="center";x.textBaseline="top";
+    if(n<=8||i%2===0)x.fillText(new Date(s.date).getDate()+"/"+(new Date(s.date).getMonth()+1),cx,h-B+4);
+  });
+}
+function sampleData(){
+  var out=[],now=Date.now(),day=86400000;
+  for(var i=0;i<8;i++){
+    var p=i/7, am=10+p*10, pf=48+p*26, pfs=40+p*30, af=pfs*.5, as=clamp(65-p*35,5,100);
+    var r={id:now-(7-i)*day,date:now-(7-i)*day,dur:420+i*35,samples:(420+i*35)*10,avgMot:am,peakMot:am+20,avgFlex:pf*.6,peakFlex:pf,avgFsr:af,peakFsr:pfs,avgAssist:as,peakAssist:Math.min(100,as+22),source:"sample",sample:true,series:[]};
+    r.score=scoreOf(r);out.push(r);
+  }
+  return out.reverse();
+}
+
+/* ---------- report ---------- */
+function reportString(){
+  var L=[],p=profile,n=sessions.length;
+  L.push("HAND FUNCTION RECOVERY REPORT");
+  L.push("Generated: "+new Date().toLocaleString());
+  L.push("");
+  L.push("Patient: "+(p.name||"(not entered)")+(p.age?", age "+p.age:""));
+  L.push("Affected hand: "+p.side+(p.cond?"  |  Condition: "+p.cond:""));
+  L.push("");
+  if(!n){L.push("No sessions recorded yet.");}
+  else{
+    var a=sessions[n-1],b=sessions[0];
+    var avg=function(k){return sessions.reduce(function(s,x){return s+x[k]},0)/n};
+    L.push("Sessions recorded: "+n+" ("+new Date(a.date).toLocaleDateString()+" to "+new Date(b.date).toLocaleDateString()+")");
+    L.push("Total therapy time: "+Math.round(sessions.reduce(function(s,x){return s+x.dur},0)/60)+" min");
+    L.push("");
+    L.push("Average hand motion: "+Math.round(avg("avgMot"))+"%");
+    L.push("Average peak hand bend: "+Math.round(avg("peakFlex"))+"%");
+    L.push("Average grip force: "+Math.round(avg("avgFsr"))+"%");
+    L.push("Average peak grip force: "+Math.round(avg("peakFsr"))+"%");
+    L.push("Average servo assistance: "+Math.round(avg("avgAssist"))+"%");
+    L.push("Highest servo assistance: "+Math.round(Math.max.apply(null,sessions.map(function(x){return x.peakAssist||x.avgAssist})))+"%");
+    L.push("");
+    L.push("First session score: "+a.score+"/100");
+    L.push("Latest session score: "+b.score+"/100");
+    var ch=b.score-a.score;
+    L.push("Change: "+(ch>0?"+":"")+ch+" points"+(n>1?(ch>5?" (improving)":ch<-5?" (declining, review with therapist)":" (steady)"):""));
+    L.push("Assistance needed first -> latest: "+Math.round(a.avgAssist)+"% -> "+Math.round(b.avgAssist)+"%");
+    if(sessions.some(function(s){return s.sample}))L.push("\nNote: includes sample data used for preview.");
+  }
+  if(p.notes)L.push("\nTherapist notes:\n"+p.notes);
+  L.push("\nScore = 45% peak hand bend + 35% peak grip force + 20% hand motion, reduced as servo assistance rises.");
+  return L.join("\n");
+}
+function renderReport(){$("reportText").textContent=reportString()}
+function csvString(){
+  var rows=[["date","duration_s","avg_motion_pct","peak_motion_pct","avg_bend_pct","peak_bend_pct","avg_force_pct","peak_force_pct","avg_assist_pct","peak_assist_pct","score","source"]];
+  sessions.slice().reverse().forEach(function(s){rows.push([new Date(s.date).toISOString(),s.dur,s.avgMot.toFixed(1),s.peakMot.toFixed(1),s.avgFlex.toFixed(1),s.peakFlex.toFixed(1),s.avgFsr.toFixed(1),s.peakFsr.toFixed(1),s.avgAssist.toFixed(1),(s.peakAssist||s.avgAssist).toFixed(1),s.score,s.source])});
+  return rows.map(function(r){return r.join(",")}).join("\n");
+}
+
+/* ---------- events ---------- */
+$("tabs").addEventListener("click",function(e){
+  var b=e.target.closest("button");if(!b)return;
+  document.querySelectorAll("nav button").forEach(function(x){x.classList.toggle("active",x===b)});
+  document.querySelectorAll("section").forEach(function(s){s.classList.toggle("active",s.id===b.dataset.tab)});
+  window.scrollTo(0,0);
+  if(b.dataset.tab==="history")renderHistory();if(b.dataset.tab==="report")renderReport();if(b.dataset.tab==="live")render();
+});
+function cmdText(tpl,l,sp){return tpl.replace(/\{level\}/g,l).replace(/\{speed\}/g,sp).replace(/\\n/g,"\n")}
+function motorUi(){$("motorChip").className="chip"+(motorOn?" on":"");$("motorText").textContent=motorOn?"Motor running":"Motor stopped"}
+function sendMotor(on){
+  var note=$("ctlNote"),level=Number($("ctlLevel").value),speed=Number($("ctlSpeed").value);
+  if(!link.on){note.textContent="Connect the sleeve first.";return}
+  var ok=function(){motorOn=on;motorUi();note.textContent=on?"Motor started: level "+level+"%, speed "+speed+"%.":"Motor stopped."};
+  var fail=function(m){note.textContent=m};
+  if(link.mode==="demo"){demoCtl={on:on,level:level,speed:speed};ok();return}
+  var text=cmdText(on?$("cmdStart").value:$("cmdStop").value,level,speed);
+  if(link.mode==="wifi"){
+    if(link.ws){try{link.ws.send(text);ok()}catch(e){fail("Could not send.")}return}
+    var path=on?"/start?level="+level+"&speed="+speed:"/stop",u;
+    try{u=new URL(path,link.url).href}catch(e){fail("The ESP32 address is not valid.");return}
+    fetch(u,{mode:"no-cors",cache:"no-store"}).then(ok,function(){fail("Could not reach the ESP32.")});
+    return;
+  }
+  if(!link.rx){fail("This ESP32 has no Bluetooth receive channel. Ask your hardware teammate to add the write characteristic.");return}
+  link.rx.writeValue(new TextEncoder().encode(text)).then(ok,function(e){fail("Could not send: "+(e&&e.message||e))});
+}
+["ctlLevel","ctlSpeed"].forEach(function(id){
+  $(id).addEventListener("input",function(){$(id+"V").textContent=$(id).value});
+  $(id).addEventListener("change",function(){if(motorOn)sendMotor(true)});
+});
+$("startMotorBtn").addEventListener("click",function(){sendMotor(true)});
+$("stopMotorBtn").addEventListener("click",function(){sendMotor(false)});
+$("resetStatsBtn").addEventListener("click",function(){stats=newStats();render()});
+["cmdStart","cmdStop"].forEach(function(id){var v=load("sm_"+id,"");if(v)$(id).value=v;$(id).addEventListener("input",function(){save("sm_"+id,$(id).value)})});
+$("pauseBtn").addEventListener("click",function(){
+  paused=!paused;if(paused)pausedAt=Date.now();
+  $("pauseBtn").textContent=paused?"Resume graph":"Pause graph";
+  if(paused)drawChart();else render();
+});
+$("mode").addEventListener("change",function(){
+  var m=$("mode").value;$("urlField").hidden=m!=="wifi";
+  $("connNote").textContent=m==="ble"?"Works in Chrome on Android. Tap Connect, then pick your sleeve from the list.":m==="wifi"?"Join the ESP32's Wi-Fi first, then enter its address.":"";
+});
+$("connBtn").addEventListener("click",function(){
+  var m=$("mode").value;link.mode=m;$("connNote").textContent="";
+  if(m==="demo")startDemo();
+  else if(m==="ble")startBle();
+  else{var u=$("url").value.trim();if(!u){$("connNote").textContent="Enter the ESP32 address first.";return}
+    if(!/^(https?|wss?):\/\//i.test(u))u="http://"+u;save("sm_url",u);$("url").value=u;startWifi(u)}
+});
+$("discBtn").addEventListener("click",function(){if(sess)endSession();stopLink()});
+$("sessBtn").addEventListener("click",function(){
+  if(sess){endSession();return}
+  if(!link.on){$("connNote").textContent="Connect the sleeve or choose Demo first.";$("statusText").textContent="Connect first, then start a session.";return}
+  startSession();
+});
+$("sampleBtn").addEventListener("click",function(){sessions=sampleData().concat(sessions.filter(function(s){return!s.sample})).sort(function(a,b){return b.date-a.date});save("sm_sessions2",sessions);renderHistory();renderReport()});
+var armed=false;
+$("clearBtn").addEventListener("click",function(){
+  if(!armed){armed=true;$("clearBtn").textContent="Tap again to delete all";$("clearNote").textContent="This removes every saved session from this device.";
+    setTimeout(function(){armed=false;$("clearBtn").textContent="Clear history";$("clearNote").textContent=""},4000);return}
+  armed=false;sessions=[];save("sm_sessions2",sessions);$("clearBtn").textContent="Clear history";$("clearNote").textContent="";renderHistory();renderReport();
+});
+$("csvBtn").addEventListener("click",function(){
+  if(!sessions.length){$("reportNote").textContent="Record a session first.";return}
+  var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csvString()],{type:"text/csv"}));
+  a.download="sleeve-sessions.csv";document.body.appendChild(a);a.click();a.remove();$("reportNote").textContent="CSV downloaded.";
+});
+$("copyBtn").addEventListener("click",function(){
+  var t=reportString();
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){$("reportNote").textContent="Report copied."},function(){
+    var r=document.createRange();r.selectNodeContents($("reportText"));var s=getSelection();s.removeAllRanges();s.addRange(r);$("reportNote").textContent="Select and copy the text above.";});
+});
+[["pName","name"],["pAge","age"],["pSide","side"],["pCond","cond"],["pNotes","notes"]].forEach(function(p){
+  var el=$(p[0]);el.value=profile[p[1]];
+  el.addEventListener("input",function(){profile[p[1]]=el.value;var ok=save("sm_profile",profile);$("saveNote").textContent=ok?"Saved on this device.":"Could not save in this browser, changes last until you close the page."});
+});
+var u=load("sm_url","");if(u)$("url").value=u;
+$("mode").dispatchEvent(new Event("change"));
+window.addEventListener("resize",function(){drawChart();drawTrend()});
+setInterval(function(){if(sess||link.on)render()},250);
+renderHistory();renderReport();render();
+})();
+</script>
+</body>
+</html>

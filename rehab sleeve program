@@ -1,0 +1,447 @@
+/*
+  WEARABLE ELBOW MOVEMENT MONITOR  +  BLUETOOTH FOR THE SLEEVE MONITOR APP
+  ESP32 + FLEX + FSR + GY-61 + MG995 servo
+
+  This is YOUR code with Bluetooth added. Search for "NEW" to see what was added.
+  Everything else (pins, Serial Monitor output, commands B, X, ON, OFF, C, S,
+  servo movement 90 -> 30 -> 90 -> 120 -> 90, flex calibration) works as before.
+
+  What the app can do:
+    - show Flex, FSR and Accelerometer values live
+    - START the servo movement and STOP it
+    - change the servo level (how far it moves) and speed
+
+  Servo power: use a separate 5-6 V supply for the MG995, with all GND joined.
+  Keep the servo unloaded and away from fingers while testing.
+*/
+const int FLEX_PIN = 34;
+const int FSR_PIN  = 35;
+
+const int ACC_X_PIN = 32;
+const int ACC_Y_PIN = 33;
+const int ACC_Z_PIN = 36;
+
+
+const int SERVO_PIN = 18;
+Servo elbowServo;
+
+bool servoAttached = false;
+bool servoTestRunning = false;
+
+int servoPosition = 90;
+int testTarget = 90;
+
+unsigned long lastServoStep = 0;
+unsigned long servoStepInterval = 25;      // NEW: was a constant, now the app can change it (milliseconds per degree)
+
+
+// Replace these example values after calibration.
+int flexStraight = 2000;
+int flexBent = 3000;
+
+float movementPerformance = 0.0;
+
+int flexRaw = 0;
+int fsrRaw = 0;
+
+int accXRaw = 0;
+int accYRaw = 0;
+int accZRaw = 0;
+
+String command = "";
+
+
+// GY-61 (ADXL335) on 3.3 V: about 1.65 V at 0 g and 0.33 V per g, which is about 410 counts per g.
+// At power-on keep the sleeve still and flat for 1 second so the zero points can be measured.
+const float COUNTS_PER_G = 410.0;
+float zeroX = 2048, zeroY = 2048, zeroZ = 2048 + 410;
+float gX = 0, gY = 0, gZ = 0;
+
+
+int  testPhase = 0;                 // 0: go low, 1: back to 90, 2: go high, 3: back to 90
+bool appRepeat = false;             // true when started from the app: repeats until STOP
+int  appLevel = 50;                 // 0-100, 100 = your original range (30 to 120 degrees)
+int  appSpeed = 50;                 // 0-100
+volatile bool pendingStart = false; // set by Bluetooth, handled in loop()
+volatile bool pendingStop  = false;
+
+int lowTarget()  { return 90 - (60 * max(appLevel, 5)) / 100; }   // 100% -> 30
+int highTarget() { return 90 + (30 * max(appLevel, 5)) / 100; }   // 100% -> 120
+
+
+#define SERVICE_UUID "6e400001-b5a5-f393-a8be-ec5ed3b8a3c0"
+#define RX_UUID      "6e400002-b5a5-f393-a8be-ec5ed3b8a3c0"   // app -> ESP32
+#define TX_UUID      "6e400003-b5a5-f393-a8be-ec5ed3b8a3c0"   // ESP32 -> app
+BLECharacteristic *txChar;
+bool bleConnected = false;
+
+class ServerCb : public BLEServerCallbacks {
+  void onConnect(BLEServer*) { bleConnected = true; }
+  void onDisconnect(BLEServer* s) {
+    bleConnected = false;
+    pendingStop = true;              // safety: servo stops when the phone disconnects
+    s->startAdvertising();
+  }
+};
+
+// Commands from the app:  START,<level>,<speed>   and   STOP
+class RxCb : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) {
+    String cmd = String(c->getValue().c_str());
+    cmd.trim();
+    if (cmd.startsWith("START")) {
+      int a = cmd.indexOf(','), b = cmd.indexOf(',', a + 1);
+      if (a > 0 && b > a) {
+        appLevel = constrain(cmd.substring(a + 1, b).toInt(), 0, 100);
+        appSpeed = constrain(cmd.substring(b + 1).toInt(), 0, 100);
+        servoStepInterval = 60 - (appSpeed * 50) / 100;   // speed 0 -> 60 ms/degree, speed 100 -> 10 ms/degree
+      }
+      pendingStart = true;
+    } else if (cmd.startsWith("STOP")) {
+      pendingStop = true;
+    }
+  }
+};
+
+void sendLine(const char *line) {            // Bluetooth sends 20 bytes at a time
+  size_t n = strlen(line);
+  for (size_t i = 0; i < n; i += 20) {
+    txChar->setValue((uint8_t*)(line + i), min((size_t)20, n - i));
+    txChar->notify();
+    delay(3);
+  }
+}
+
+// ---------- READ SENSORS ----------
+void readSensors() {
+  flexRaw = analogRead(FLEX_PIN);
+  fsrRaw = analogRead(FSR_PIN);
+
+  accXRaw = analogRead(ACC_X_PIN);
+  accYRaw = analogRead(ACC_Y_PIN);
+  accZRaw = analogRead(ACC_Z_PIN);
+
+  // NEW: raw counts -> g
+  gX = (accXRaw - zeroX) / COUNTS_PER_G;
+  gY = (accYRaw - zeroY) / COUNTS_PER_G;
+  gZ = (accZRaw - zeroZ) / COUNTS_PER_G;
+}
+
+// ---------- CALCULATE EXPERIMENTAL MOVEMENT SCORE ----------
+void calculateMovementPerformance() {
+  int range = flexBent - flexStraight;
+
+  if (abs(range) < 50) {
+    movementPerformance = 0;
+    return;
+  }
+
+  float progress =
+      (float)(flexRaw - flexStraight) / (float)range;
+
+  // Limit the result to 0-100%.
+  progress = constrain(progress, 0.0, 1.0);
+
+  movementPerformance = progress * 100.0;
+}
+
+// ---------- SERVO ATTACH ----------
+void attachServoIfNeeded() {
+  if (!servoAttached) {
+    elbowServo.setPeriodHertz(50);
+    elbowServo.attach(SERVO_PIN, 500, 2500);
+    servoAttached = true;
+    elbowServo.write(servoPosition);
+    delay(300);
+  }
+}
+
+// ---------- STOP SERVO TEST ----------
+void stopServoTest() {
+  servoTestRunning = false;
+  appRepeat = false;
+  testTarget = servoPosition;
+
+  Serial.println();
+  Serial.println("Servo test stopped.");
+  Serial.println("Servo status: STOPPED");
+  Serial.println("For emergency stopping, disconnect servo power.");
+}
+
+// ---------- START MANUAL BENCH TEST ----------
+void startServoTest() {
+  if (servoTestRunning) {
+    Serial.println("Servo test is already running.");
+    return;
+  }
+
+  attachServoIfNeeded();
+
+  servoTestRunning = true;
+  testPhase = 0;                      // NEW
+  testTarget = lowTarget();           // was 30
+  lastServoStep = millis();
+
+  Serial.println("Servo test started.");
+  Serial.println("Keep the servo unloaded and away from fingers.");
+}
+
+// ---------- NON-BLOCKING SERVO MOVEMENT ----------
+void updateServoTest() {
+  if (!servoTestRunning) {
+    return;
+  }
+
+  if (millis() - lastServoStep < servoStepInterval) {
+    return;
+  }
+
+  lastServoStep = millis();
+
+  if (servoPosition < testTarget) {
+    servoPosition++;
+  } else if (servoPosition > testTarget) {
+    servoPosition--;
+  } else {
+    // Same path as before: 90 -> low -> 90 -> high -> 90, then stop.
+    // NEW: when started from the app it repeats until STOP.
+    if (testPhase == 0) {
+      testPhase = 1; testTarget = 90;
+    } else if (testPhase == 1) {
+      testPhase = 2; testTarget = highTarget();
+    } else if (testPhase == 2) {
+      testPhase = 3; testTarget = 90;
+    } else {
+      if (appRepeat) {
+        testPhase = 0; testTarget = lowTarget();
+      } else {
+        stopServoTest();
+        return;
+      }
+    }
+  }
+
+  elbowServo.write(servoPosition);
+}
+
+// ---------- SERIAL COMMANDS ----------
+void processCommand(String cmd) {
+  cmd.trim();
+  cmd.toUpperCase();
+
+  if (cmd == "B") {
+    // B = begin unloaded servo test
+    appRepeat = false;
+    startServoTest();
+  }
+  else if (cmd == "X") {
+    // X = stop servo test
+    stopServoTest();
+  }
+  else if (cmd == "ON") {
+    // ON = enable servo signal, without starting a movement test
+    if (!servoTestRunning) {
+      attachServoIfNeeded();
+      Serial.println("Servo signal enabled.");
+    }
+  }
+  else if (cmd == "OFF") {
+    // OFF = stop test and detach servo signal
+    stopServoTest();
+
+    if (servoAttached) {
+      elbowServo.detach();
+      servoAttached = false;
+    }
+
+    Serial.println("Servo signal detached.");
+    Serial.println("Disconnect servo power for a physical shutdown.");
+  }
+  else if (cmd == "C") {
+    // C = show current calibration
+    Serial.println("Current flex calibration:");
+    Serial.print("Straight = ");
+    Serial.println(flexStraight);
+    Serial.print("Bent = ");
+    Serial.println(flexBent);
+  }
+  else if (cmd == "S") {
+    // S = show one sensor reading
+    readSensors();
+
+    Serial.print("Flex: ");
+    Serial.println(flexRaw);
+
+    Serial.print("FSR: ");
+    Serial.println(fsrRaw);
+
+    Serial.print("Accel X: ");
+    Serial.println(accXRaw);
+
+    Serial.print("Accel Y: ");
+    Serial.println(accYRaw);
+
+    Serial.print("Accel Z: ");
+    Serial.println(accZRaw);
+  }
+  else {
+    Serial.println("Unknown command.");
+    Serial.println("Commands: B, X, ON, OFF, C, S");
+  }
+}
+
+// ---------- DISPLAY OUTPUT ----------
+void displayOutput() {
+  Serial.print("Flex=");
+  Serial.print(flexRaw);
+
+  Serial.print(" | FSR=");
+  Serial.print(fsrRaw);
+
+  Serial.print(" | AX=");
+  Serial.print(accXRaw);
+
+  Serial.print(" | AY=");
+  Serial.print(accYRaw);
+
+  Serial.print(" | AZ=");
+  Serial.print(accZRaw);
+
+  Serial.print(" | Movement performance=");
+  Serial.print(movementPerformance, 1);
+  Serial.print("%");
+
+  Serial.print(" | Muscle weakness=NOT DETERMINED");
+
+  Serial.print(" | Servo=");
+
+  if (servoTestRunning) {
+    Serial.print("TEST RUNNING");
+  } else if (servoAttached) {
+    Serial.print("ON / HOLDING COMMAND");
+  } else {
+    Serial.print("OFF");
+  }
+
+  Serial.println();
+}
+
+// ---------- SETUP ----------
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  analogReadResolution(12);
+
+  pinMode(FLEX_PIN, INPUT);
+  pinMode(FSR_PIN, INPUT);
+
+  pinMode(ACC_X_PIN, INPUT);
+  pinMode(ACC_Y_PIN, INPUT);
+  pinMode(ACC_Z_PIN, INPUT);
+
+  Serial.println();
+  Serial.println("====================================");
+  Serial.println("WEARABLE ELBOW MOVEMENT MONITOR");
+  Serial.println("ESP32 + FLEX + FSR + GY-61");
+  Serial.println("====================================");
+
+  Serial.println("Muscle weakness: NOT CLINICALLY MEASURED");
+  Serial.println("Movement score requires calibration.");
+  Serial.println();
+  Serial.println("Commands:");
+  Serial.println("B  = start unloaded servo test");
+  Serial.println("X  = stop servo test");
+  Serial.println("ON = enable servo signal");
+  Serial.println("OFF= detach servo signal");
+  Serial.println("S  = show sensor readings");
+  Serial.println("C  = show flex calibration");
+  Serial.println();
+
+  // NEW: accelerometer zero points (keep the sleeve still and flat)
+  Serial.println("Calibrating accelerometer, keep the sleeve still...");
+  long sx = 0, sy = 0, sz = 0;
+  for (int i = 0; i < 100; i++) {
+    sx += analogRead(ACC_X_PIN);
+    sy += analogRead(ACC_Y_PIN);
+    sz += analogRead(ACC_Z_PIN);
+    delay(10);
+  }
+  zeroX = sx / 100.0;
+  zeroY = sy / 100.0;
+  zeroZ = sz / 100.0 - COUNTS_PER_G;     // Z reads +1 g when flat
+
+  // NEW: start Bluetooth
+  BLEDevice::init("Rehab Sleeve");
+  BLEServer *srv = BLEDevice::createServer();
+  srv->setCallbacks(new ServerCb());
+  BLEService *svc = srv->createService(SERVICE_UUID);
+  txChar = svc->createCharacteristic(TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  txChar->addDescriptor(new BLE2902());
+  BLECharacteristic *rx = svc->createCharacteristic(RX_UUID,
+      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  rx->setCallbacks(new RxCb());
+  svc->start();
+  srv->getAdvertising()->addServiceUUID(SERVICE_UUID);
+  srv->getAdvertising()->start();
+  Serial.println("Bluetooth ready: connect to 'Rehab Sleeve' from the app.");
+
+  Serial.println("Servo starts OFF.");
+}
+
+// ---------- MAIN LOOP ----------
+void loop() {
+  // Read commands without blocking servo movement.
+  while (Serial.available()) {
+    char ch = Serial.read();
+
+    if (ch == '\n' || ch == '\r') {
+      if (command.length() > 0) {
+        processCommand(command);
+        command = "";
+      }
+    } else {
+      command += ch;
+
+      if (command.length() > 30) {
+        command = "";
+      }
+    }
+  }
+
+  // NEW: START / STOP coming from the app
+  if (pendingStop) {
+    pendingStop = false;
+    if (servoTestRunning) stopServoTest();
+    appRepeat = false;
+  }
+  if (pendingStart) {
+    pendingStart = false;
+    appRepeat = true;
+    if (!servoTestRunning) startServoTest();
+    Serial.println("App: servo START");
+  }
+
+  readSensors();
+  calculateMovementPerformance();
+  updateServoTest();
+
+  // NEW: send readings to the app 10 times a second
+  static unsigned long lastSend = 0;
+  if (bleConnected && millis() - lastSend >= 100) {
+    lastSend = millis();
+    float fsrPct = fsrRaw * 100.0 / 4095.0;
+    int servoPct = constrain((abs(servoPosition - 90) * 100) / 60, 0, 100);   // 60 degrees = full range
+    char line[64];
+    // order the app expects: fsr, flex, ax, ay, az, servo   (fsr and flex are percentages)
+    snprintf(line, sizeof(line), "%.1f,%.1f,%.2f,%.2f,%.2f,%d\n",
+             fsrPct, movementPerformance, gX, gY, gZ, servoPct);
+    sendLine(line);
+  }
+
+  static unsigned long lastPrint = 0;
+
+  if (millis() - lastPrint >= 500) {
+    lastPrint = millis();
+    displayOutput();
+  }
